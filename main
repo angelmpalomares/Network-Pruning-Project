@@ -1,29 +1,25 @@
 from argparse import Namespace
-
+from collections import OrderedDict
 import torch
 import torch.utils.data
 import torch.nn as nn
-# import torch.optim as optim
 import torch.nn.functional as F
-# import torch.backends.cudnn as cudnn
-
 import torchvision
 import torchvision.transforms as transforms
-
-# import os
+import torch.nn.utils.prune as prune
 import argparse
 
 batch_size = 64
-
-
-class Classifier:
+prune.Ran
+class Classifier(nn.Module):
     """Classifier that makes predictions on images of animals."""
 
     def __init__(self, backbone="MLP", device="cuda:0"):
+        super(Classifier,self).__init__()
         """Create an untrained classifier.
 
         Args:
-            backbone: the string ("resnet" or "simplecnn") that indicates which backbone network will be used.
+            backbone: the string ("MLP", "CNN" or ResNet) that indicates which backbone network will be used.
             device: the string ("cpu", "cuda:0", "cuda:1", ...) that indicates the device to use.
         """
 
@@ -33,28 +29,30 @@ class Classifier:
         self.device = torch.device(device)  # the device on which data will be moved
         self.data_mean = torch.zeros(3)  # the mean of the training data on the 3 channels (RGB)
         self.data_std = torch.ones(3)  # the standard deviation of the training data on the 3 channels (RGB)
-        #self.preprocess_train = None  # image preprocessing operations (when training the classifier)
-        #self.preprocess_eval = None  # image preprocessing operations (when evaluating the classifier)
+
 
         # creating the network
         if backbone is not None and backbone == "MLP":
 
             # Case 1, using an MLP
-            self.net = nn.Sequential(
+            self.net = nn.Sequential(OrderedDict([
 
-                nn.Linear(3072, 1000),
-                nn.ReLU(inplace=True),
-                nn.Linear(1000, 500),
-                nn.ReLU(inplace=True),
-                nn.Linear(500, 250),
-                nn.ReLU(inplace=True),
-                nn.Linear(250, 100),
-                nn.ReLU(inplace=True),
-                nn.Linear(100, 50),
-                nn.ReLU(inplace=True),
-                nn.Dropout(),
-                nn.Linear(50, self.num_outputs)
-            )
+                ('one',nn.Linear(3072, 1000)),
+                ('two',nn.ReLU(inplace=True)),
+                ('three',nn.Linear(1000, 500)),
+                ('four',nn.ReLU(inplace=True)),
+                ('five',nn.Linear(500, 250)),
+                ('six',nn.ReLU(inplace=True)),
+                ('seven',nn.Linear(250, 100)),
+                ('eight',nn.ReLU(inplace=True)),
+                ('nine',nn.Linear(100, 50)),
+                ('ten',nn.ReLU(inplace=True)),
+                ('eleven',nn.Dropout()),
+                ('twelve',nn.Linear(50, self.num_outputs))
+            ]))
+
+            # moving the network to the right device memory
+            self.net.to(self.device)
 
 
         elif backbone is not None and backbone == "CNN":
@@ -64,12 +62,13 @@ class Classifier:
                 nn.Conv2d(3, 64, kernel_size=5, stride=2, padding=1),
                 nn.ReLU(inplace=True),
                 nn.MaxPool2d(2),
+                nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
+                nn.ReLU(inplace=True),
                 nn.Conv2d(64, 256, kernel_size=5, stride=2, padding=1),
                 nn.ReLU(inplace=True),
                 nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
                 nn.ReLU(inplace=True),
                 nn.Conv2d(256, 256, kernel_size=2, stride=1, padding=0),
-                nn.ReLU(inplace=True),
                 nn.Flatten(),
                 nn.Linear(1024, 4096),
                 nn.ReLU(inplace=True),
@@ -79,8 +78,48 @@ class Classifier:
                 nn.Linear(4096, self.num_outputs)
             )
 
+            # moving the network to the right device memory
+            self.net.to(self.device)
 
-        # elif backbone is not None and backbone == "ResNet":
+        elif backbone is not None and backbone == "ResNet":
+
+            if device == "cpu":
+
+                self.conv1 = nn.Conv2d(3, 64, kernel_size=5, stride=2, padding=1)
+                self.rel1 = nn.ReLU(inplace=True)
+                self.max1 = nn.MaxPool2d(2)
+                self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1)
+                self.rel2 = nn.ReLU(inplace=True)
+                self.conv3 = nn.Conv2d(64, 256, kernel_size=3, stride=1, padding=1)
+                self.rel3 = nn.ReLU(inplace=True)
+                self.conv4 = nn.Conv2d(256, 256, kernel_size=2, stride=1, padding=0)
+                self.rel4 = nn.ReLU(inplace=True)
+                self.conv5 = nn.Conv2d(256, 256, kernel_size=2, stride=1, padding=0)
+                self.flat = nn.Flatten()
+                self.lin1 = nn.Linear(1024, 4096)
+                self.rel5 = nn.ReLU(inplace=True)
+                self.lin2 = nn.Linear(4096, 4096)
+                self.rel6 = nn.ReLU(inplace=True)
+                self.drop = nn.Dropout()
+                self.output = nn.Linear(4096, self.num_outputs)
+            else:
+                self.conv1 = nn.Conv2d(3, 64, kernel_size=5, stride=2, padding=1).cuda()
+                self.rel1 = nn.ReLU(inplace=True).cuda()
+                self.max1 = nn.MaxPool2d(2).cuda()
+                self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1).cuda()
+                self.rel2 = nn.ReLU(inplace=True).cuda()
+                self.conv3 = nn.Conv2d(64, 256, kernel_size=3, stride=1, padding=1).cuda()
+                self.rel3 = nn.ReLU(inplace=True).cuda()
+                self.conv4 = nn.Conv2d(256, 256, kernel_size=2, stride=1, padding=0).cuda()
+                self.rel4 = nn.ReLU(inplace=True).cuda()
+                self.conv5 = nn.Conv2d(256, 256, kernel_size=2, stride=1, padding=0).cuda()
+                self.flat = nn.Flatten().cuda()
+                self.lin1 = nn.Linear(1024, 4096).cuda()
+                self.rel5 = nn.ReLU(inplace=True).cuda()
+                self.lin2 = nn.Linear(4096, 4096).cuda()
+                self.rel6 = nn.ReLU(inplace=True).cuda()
+                self.drop = nn.Dropout().cuda()
+                self.output = nn.Linear(4096, self.num_outputs).cuda()
 
         else:
             if backbone is not None:
@@ -89,11 +128,8 @@ class Classifier:
                 raise ValueError("Specify a backbone network!")
 
         # registering data_mean and data_std as 'buffers', so they will be saved together with the net
-        self.net.register_buffer("data_mean_buffer", self.data_mean)
-        self.net.register_buffer("data_std_buffer", self.data_std)
-
-        # moving the network to the right device memory
-        self.net.to(self.device)
+        self.net.register_buffer("data_mean_buffer", torch.tensor([0.49139968, 0.48215841, 0.44653091]))
+        self.net.register_buffer("data_std_buffer", torch.tensor([0.24703223, 0.24348513, 0.26158784]))
 
     def save(self, file_name):
         """Save the classifier (network and data mean and std)."""
@@ -120,6 +156,29 @@ class Classifier:
         outputs = torch.nn.functional.softmax(logits, dim=1)
 
         # we also return the logits (useful in order to more precisely compute the loss function)
+        return outputs, logits
+
+    def forward_res(self, x):
+
+        O1 = self.conv1(x)
+        O2 = self.rel1(O1)
+        O3 = self.max1(O2)
+        O4 = self.conv2(O3) + O1
+        O5 = self.rel2(O4)
+        O6 = self.conv3(O5)
+        O7 = self.rel3(O6)
+        O8 = self.conv4(O7) + O6
+        O9 = self.rel4(O8)
+        O10 = self.conv5(O9)
+        O11 = self.flat(O10)
+        O12 = self.lin1(O11)
+        O13 = self.rel5(O12)
+        O14 = self.lin2(O13)
+        O15 = self.rel6(O14)
+        O16 = self.drop(O15)
+        logits = self.output(O16)
+        outputs = torch.nn.functional.softmax(logits, dim=1)
+
         return outputs, logits
 
     @staticmethod
@@ -175,6 +234,7 @@ class Classifier:
                 local_labels = local_labels.to(self.device)
 
                 # computing the network output on the current mini-batch
+
                 outputs, logits = self.forward(local_batch)
 
                 # computing the loss function
@@ -200,7 +260,7 @@ class Classifier:
                     self.net.train()  # going back to train mode
 
                     # printing (mini-batch related) stats on screen
-                    #print("  mini-batch:\tloss={0:.4f}, tr_acc={1:.2f}".format(loss.item(), batch_train_acc))
+                    # print("  mini-batch:\tloss={0:.4f}, tr_acc={1:.2f}".format(loss.item(), batch_train_acc))
 
             val_acc = self.eval_classifier(validation_set, netname)
 
@@ -291,11 +351,39 @@ class Classifier:
         return acc_main_classes
 
 
+class Pruner:
+    """Pruning class to measure different metrics and save the model"""
+
+    def __init__(self, model='MLP', parameters='weight', technique='prune.RandomUnstructured', device="cuda:0"):
+        self.model = model
+        self.parameters = parameters
+        self.technique = technique
+        self.device = device
+
+    def prune_net(self, net, model, technique, parameter, percentage):
+
+        if model == 'MLP':
+            parameters_to_prune = (
+                (net.net.one, parameter),
+                (net.net.three, parameter),
+                (net.net.five, parameter),
+                (net.net.seven, parameter),
+                (net.net.nine, parameter),
+                (net.net.twelve, parameter))
+        prune.global_unstructured(
+            parameters_to_prune,
+            pruning_method=technique,
+            amount=percentage,
+        )
+
+
+
+
 def parse_command_line_arguments():
     """Parse command line arguments, checking their values."""
 
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('mode', choices=['train', 'eval'],
+    parser.add_argument('mode', choices=['train', 'eval', 'prune'],
                         help='train or evaluate the classifier')
     parser.add_argument('--backbone', type=str, default='MLP', choices=['MLP', 'CNN', 'ResNet'],
                         help='backbone network for feature extraction (default: MLP)"')
@@ -305,6 +393,10 @@ def parse_command_line_arguments():
                         help='learning rate (Adam) (default: 0.001)')
     parser.add_argument('--device', default='cuda:0', type=str,
                         help='device to be used for computations (in {cpu, cuda:0, cuda:1, ...}, default: cuda:0)')
+    parser.add_argument('--pruning', type=str, default='random', choices=['random', 'layer', 'model'],
+                        help='pruning technique (default: random)"')
+    parser.add_argument('--prune_parameters', type=str, default='weight', choices=['weight', 'bias'],
+                        help='parameter to prune (default: weight)"')
 
     parsed_arguments: Namespace = parser.parse_args()
 
@@ -399,12 +491,25 @@ if __name__ == "__main__":
         # loading the classifier
         _classifier.load('{}.pth'.format(args.backbone))
 
-        # preparing the data
-        _data_set = test_loader
-
-        # adding classifier-specific preprocessing operations
-
         # computing the classifier performance
-        _acc = _classifier.eval_classifier(_data_set, args.backbone)
+        _acc = _classifier.eval_classifier(test_loader, args.backbone)
 
         print("acc={0:.2f}".format(_acc))
+
+    elif args.mode == 'prune':
+
+        #We set the percentages to prune, we will arrive to 60%
+        percentages = [0.1,0.2,0.3,0.4,0.5,0.6]
+
+        # In order to prune a model, the desired model is created and loaded
+        _classifier = Classifier(args.backbone, args.device)
+        _classifier.load('{}.pth'.format(args.backbone))
+
+
+
+
+
+
+
+
+
