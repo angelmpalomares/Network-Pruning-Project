@@ -9,6 +9,7 @@ import torchvision
 import torchvision.transforms as transforms
 import torch.nn.utils.prune as prune
 import argparse
+import numpy as np
 
 batch_size = 64
 
@@ -59,25 +60,26 @@ class Classifier(nn.Module):
         elif backbone is not None and backbone == "CNN":
 
             # Case 2: CNN network
-            self.net = nn.Sequential(
-                nn.Conv2d(3, 64, kernel_size=5, stride=2, padding=1),
-                nn.ReLU(inplace=True),
-                nn.MaxPool2d(2),
-                nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(64, 256, kernel_size=5, stride=2, padding=1),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(256, 256, kernel_size=2, stride=1, padding=0),
-                nn.Flatten(),
-                nn.Linear(1024, 4096),
-                nn.ReLU(inplace=True),
-                nn.Linear(4096, 4096),
-                nn.ReLU(inplace=True),
-                nn.Dropout(),
-                nn.Linear(4096, self.num_outputs)
-            )
+            self.net = nn.Sequential(OrderedDict([
+
+                ('one', nn.Conv2d(3, 64, kernel_size=5, stride=2, padding=1)),
+                ('two', nn.ReLU(inplace=True)),
+                ('three', nn.MaxPool2d(2)),
+                ('four', nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1)),
+                ('five', nn.ReLU(inplace=True)),
+                ('six', nn.Conv2d(64, 256, kernel_size=3, stride=2, padding=1)),
+                ('seven', nn.ReLU(inplace=True)),
+                ('eight', nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)),
+                ('nine', nn.ReLU(inplace=True)),
+                ('ten', nn.Conv2d(256, 256, kernel_size=2, stride=1, padding=0)),
+                ('eleven', nn.Flatten()),
+                ('twelve', nn.Linear(256, 1024)),
+                ('thirteen', nn.ReLU(inplace=True)),
+                ('fourteen', nn.Linear(1024, 1024)),
+                ('fifteen', nn.ReLU(inplace=True)),
+                ('sixteen', nn.Dropout()),
+                ('seventeen', nn.Linear(1024, self.num_outputs))
+            ]))
 
             # moving the network to the right device memory
             self.net.to(self.device)
@@ -351,36 +353,129 @@ class Classifier(nn.Module):
 
         return acc_main_classes
 
-    # Basic function to just prune the model depending on the technique
-    def prune_net(self, netname, technique, parameter, percentage):
+    def prune_net(self, netname, tech, parameter, percentage):
 
+        """Prune the network.
+
+        Args:
+            netname: string with the name of the net to prune. Used to set the layers
+            and parameters that will be pruned
+            tech: string with the torch function used to prune te net
+            parameter: string with the parameter that will be pruned. Can be bias or weight
+            percentage: integer with the value of the amount of parameters to be pruned
+        """
+        n1 = self.net.one
+        n3 = self.net.three
+        n4 = self.net.four
+        n5 = self.net.five
+        n6 = self.net.six
+        n7 = self.net.seven
+        n8 = self.net.eight
+        n9 = self.net.nine
+        n10 = self.net.ten
+        n12 = self.net.twelve
+
+        if tech == 'structured':
+            if netname == 'MLP':
+                prune.ln_structured(n1, name='weight', amount=percentage, n=1, dim=0)
+                prune.ln_structured(n3, name='weight', amount=percentage, n=1, dim=0)
+                prune.ln_structured(n5, name='weight', amount=percentage, n=1, dim=0)
+                prune.ln_structured(n7, name='weight', amount=percentage, n=1, dim=0)
+                prune.ln_structured(n9, name='weight', amount=percentage, n=1, dim=0)
+                prune.ln_structured(n12, name='weight', amount=percentage, n=1, dim=0)
+
+            if netname == 'CNN':
+                n14 = self.net.fourteen
+                n17 = self.net.seventeen
+                prune.ln_structured(n1, name='weight', amount=percentage, n=1, dim=0)
+                prune.ln_structured(n4, name='weight', amount=percentage, n=1, dim=0)
+                prune.ln_structured(n6, name='weight', amount=percentage, n=1, dim=0)
+                prune.ln_structured(n8, name='weight', amount=percentage, n=1, dim=0)
+                prune.ln_structured(n10, name='weight', amount=percentage, n=1, dim=0)
+                prune.ln_structured(n12, name='weight', amount=percentage, n=1, dim=0)
+                prune.ln_structured(n14, name='weight', amount=percentage, n=1, dim=0)
+                prune.ln_structured(n17, name='weight', amount=percentage, n=1, dim=0)
+
+        else:
+            if netname == 'MLP':
+                parameters_to_prune = (
+                    (n1, parameter),
+                    (n3, parameter),
+                    (n5, parameter),
+                    (n7, parameter),
+                    (n9, parameter),
+                    (n12, parameter))
+            if netname == 'CNN':
+                n14 = self.net.fourteen
+                n17 = self.net.seventeen
+                parameters_to_prune = (
+                    (n1, parameter),
+                    (n4, parameter),
+                    (n6, parameter),
+                    (n8, parameter),
+                    (n10, parameter),
+                    (n12, parameter),
+                    (n14, parameter),
+                    (n17, parameter)
+                )
+            prune.global_unstructured(parameters_to_prune, pruning_method=tech, amount=percentage)
+
+    # Function to test the processing speed and performance of the pruned model
+    def pruning_performance(self, dataset, model, n):
+
+        """Test the performance of the network
+
+        Args:
+            dataset: dataset used to test the net in dataloader format.
+            model: string with the name of the net, MLP, CNN or ResNet
+            n: integer with the number of times the net will be tested
+
+        Returns:
+            The accuracy in predicting the main classes and the time it takes
+        """
+
+        accuracy = 0
+        initial_time = time.time()
+        for i in range(n):
+            accuracy += self.eval_classifier(dataset, model)
+        total_time = time.time() - initial_time
+        return (total_time / n), (accuracy / n)
+
+    def compression(self, netname):
+        n1 = self.net.one
+        n3 = self.net.three
+        n4 = self.net.four
+        n5 = self.net.five
+        n6 = self.net.six
+        n7 = self.net.seven
+        n8 = self.net.eight
+        n9 = self.net.nine
+        n10 = self.net.ten
+        n12 = self.net.twelve
+
+        total = 0
+        nonzero = 0
         if netname == 'MLP':
-            parameters_to_prune = (
-                (self.net.one, parameter),
-                (self.net.three, parameter),
-                (self.net.five, parameter),
-                (self.net.seven, parameter),
-                (self.net.nine, parameter),
-                (self.net.twelve, parameter))
-        prune.global_unstructured(
-            parameters_to_prune,
-            pruning_method=technique,
-            amount=percentage,
-        )
-
-    # Function to measure size of the model
-    # def model_size(self):
-
-
-# Function to test the processing speed and performance of the pruned model
-def pruning_performance(net, dataset, model, n):
-    # We evaluate the model n times to have a meaningful measurement
-    accuracy = 0
-    initial_time = time.time()
-    for i in range(n):
-        accuracy += net.eval_classifier(dataset, model)
-    total_time = time.time() - initial_time
-    return total_time / n, accuracy / n
+            layersMLP = [n1, n3, n5, n7, n9, n12]
+            for layer in layersMLP:
+                tw = np.prod(layer.weight.shape)
+                tb = np.prod(layer.bias.shape)
+                tw_nonzero = np.count_nonzero(layer.weight.cpu().detach().numpy())
+                tb_nonzero = np.count_nonzero(layer.bias.cpu().detach().numpy())
+                total += (tw+tb)
+                nonzero += (tw_nonzero+tb_nonzero)
+        if netname == 'CNN':
+            n14 = self.net.fourteen
+            n17 = self.net.seventeen
+            layersCNN = [n1, n4, n6, n8, n10, n12, n14, n17]
+            for layer in layersCNN:
+                tw = np.prod(layer.weight.shape)
+                tb = np.prod(layer.bias.shape)
+                tw_nonzero = np.count_nonzero(layer.weight.cpu().detach().numpy())
+                tb_nonzero = np.count_nonzero(layer.bias.cpu().detach().numpy())
+                total += (tw + tb)
+                nonzero += (tw_nonzero + tb_nonzero)
+        return int(total)/int(nonzero)
 
 
 def parse_command_line_arguments():
@@ -397,7 +492,7 @@ def parse_command_line_arguments():
                         help='learning rate (Adam) (default: 0.001)')
     parser.add_argument('--device', default='cuda:0', type=str,
                         help='device to be used for computations (in {cpu, cuda:0, cuda:1, ...}, default: cuda:0)')
-    parser.add_argument('--pruning', type=str, default='random', choices=['random', 'layer', 'model'],
+    parser.add_argument('--pruning', type=str, default='random', choices=['random', 'unstructured', 'structured'],
                         help='pruning technique (default: random)"')
     parser.add_argument('--prune_parameters', type=str, default='weight', choices=['weight', 'bias'],
                         help='parameter to prune (default: weight)"')
@@ -502,18 +597,56 @@ if __name__ == "__main__":
 
     elif args.mode == 'prune':
 
+        # We set the pruning technique here according to the argument given
         if args.pruning == 'random':
             technique = prune.RandomUnstructured
-        elif args.pruning == 'layer' or 'model':
+        elif args.pruning == 'unstructured':
             technique = prune.L1Unstructured
+        elif args.pruning == 'structured':
+            technique = args.pruning
 
-        # We set the percentages to prune, we will arrive to 60%
-        percentages = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+        # Load the testset to test the pruned and unpruned models
+        transform_test = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.ToTensor(),
+            transforms.Normalize(([0.49421428, 0.48513139, 0.45040909]), (0.24665252, 0.24289226, 0.26159238))
+        ])
 
-        # In order to prune a model, the desired model is created and loaded
+        testset = torchvision.datasets.CIFAR10(
+            root='./data', train=False, download=True, transform=transform_test)
+
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
+                                                  shuffle=True, num_workers=0, pin_memory=False)
+
+        # We set the percentages to prune, we will arrive up to 80%
+        percentages = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+        a = 1
+        processing_time = [0] * (len(percentages) + 1)
+        acc = [0] * (len(percentages) + 1)
+        compression = [0] * (len(percentages) + 1)
+
+        # n is the number of times the models will be tested
+        n = 7
+
+        # In order to prune a model, the desired model is created and loaded,
+        # but first we test it on the unpruned model
         _classifier = Classifier(args.backbone, args.device)
         _classifier.load('{}.pth'.format(args.backbone))
-
+        (processing_time[0], acc[0]) = _classifier.pruning_performance(test_loader, args.backbone, n)
+        compression[0] = 1
+        # Classifier is loaded each loop in order to reinitialize the weights to the original ones
         for number in percentages:
+            print('Started {} pruning {} {} parameters for {} net'.format(args.pruning, number, args.prune_parameters, args.backbone))
+            _classifier = Classifier(args.backbone, args.device)
+            _classifier.load('{}.pth'.format(args.backbone))
             _classifier.prune_net(args.backbone, technique, args.prune_parameters, number)
 
+            # With this function we measure processing time and accuracy of the model
+            (processing_time[a], acc[a]) = _classifier.pruning_performance(test_loader, args.backbone, n)
+            compression[a] = _classifier.compression(args.backbone)
+            a += 1
+
+        print('Processing times are {}\n'.format(processing_time))
+        print('Accuracies are {}\n'.format(acc))
+        print('Compression rates are {}'.format(compression))
