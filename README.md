@@ -6,7 +6,7 @@ In order to run this code, first clone this repository
 git clone https://github.com/angelmpalomares/Network-Pruning-Project.git
 ```
 Then go to its directory, create a virtual environment, activate it and install the required python modules, which can be found in the requirements.txt
-##How to run it
+## How to run it
 Code runs with several arguments, namely:
 
 'mode': where the choices are 'train', 'eval' or 'prune'
