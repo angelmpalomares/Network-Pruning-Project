@@ -29,7 +29,8 @@ he would have to write in the terminal:
 ```
 python main.py train --backbone 'CNN' --device 'cuda:0'	--epochs 10 --lr 0.01
 ```
-##Structure
+
+## Structure
 Structure of this code is fairly simple, since it consists in only one module, main.py.
 Inside main.py the class Classifier can be found, which implements the different architectures and training methods, evaluation, and also the pruning methods and its performace evaluator functions.
 After the definition of the Classifier, the main function is called to make the appropiate computations.
