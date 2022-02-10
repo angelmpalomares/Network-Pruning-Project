@@ -10,9 +10,8 @@ import torchvision.transforms as transforms
 import torch.nn.utils.prune as prune
 import argparse
 import numpy as np
-
-batch_size = 64
-
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 class Classifier(nn.Module):
     """Classifier that makes predictions on images of animals."""
@@ -55,6 +54,11 @@ class Classifier(nn.Module):
 
             # moving the network to the right device memory
             self.net.to(self.device)
+            # registering data_mean and data_std as 'buffers', so they will be saved together with the net
+
+            self.net.register_buffer("data_mean_buffer", torch.tensor([0.49139968, 0.48215841, 0.44653091]))
+            self.net.register_buffer("data_std_buffer", torch.tensor([0.24703223, 0.24348513, 0.26158784]))
+
 
 
         elif backbone is not None and backbone == "CNN":
@@ -83,56 +87,36 @@ class Classifier(nn.Module):
 
             # moving the network to the right device memory
             self.net.to(self.device)
+            # registering data_mean and data_std as 'buffers', so they will be saved together with the net
+
+            self.net.register_buffer("data_mean_buffer", torch.tensor([0.49139968, 0.48215841, 0.44653091]))
+            self.net.register_buffer("data_std_buffer", torch.tensor([0.24703223, 0.24348513, 0.26158784]))
 
         elif backbone is not None and backbone == "ResNet":
 
-            if device == "cpu":
+            self.net = torch.hub.load('pytorch/vision:v0.6.0', 'resnet34', pretrained=True)
+            # freezing the network weights
+            for param in self.net.parameters():
+                param.requires_grad = False
 
-                self.conv1 = nn.Conv2d(3, 64, kernel_size=5, stride=2, padding=1)
-                self.rel1 = nn.ReLU(inplace=True)
-                self.max1 = nn.MaxPool2d(2)
-                self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1)
-                self.rel2 = nn.ReLU(inplace=True)
-                self.conv3 = nn.Conv2d(64, 256, kernel_size=3, stride=1, padding=1)
-                self.rel3 = nn.ReLU(inplace=True)
-                self.conv4 = nn.Conv2d(256, 256, kernel_size=2, stride=1, padding=0)
-                self.rel4 = nn.ReLU(inplace=True)
-                self.conv5 = nn.Conv2d(256, 256, kernel_size=2, stride=1, padding=0)
-                self.flat = nn.Flatten()
-                self.lin1 = nn.Linear(1024, 4096)
-                self.rel5 = nn.ReLU(inplace=True)
-                self.lin2 = nn.Linear(4096, 4096)
-                self.rel6 = nn.ReLU(inplace=True)
-                self.drop = nn.Dropout()
-                self.output = nn.Linear(4096, self.num_outputs)
-            else:
-                self.conv1 = nn.Conv2d(3, 64, kernel_size=5, stride=2, padding=1).cuda()
-                self.rel1 = nn.ReLU(inplace=True).cuda()
-                self.max1 = nn.MaxPool2d(2).cuda()
-                self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1).cuda()
-                self.rel2 = nn.ReLU(inplace=True).cuda()
-                self.conv3 = nn.Conv2d(64, 256, kernel_size=3, stride=1, padding=1).cuda()
-                self.rel3 = nn.ReLU(inplace=True).cuda()
-                self.conv4 = nn.Conv2d(256, 256, kernel_size=2, stride=1, padding=0).cuda()
-                self.rel4 = nn.ReLU(inplace=True).cuda()
-                self.conv5 = nn.Conv2d(256, 256, kernel_size=2, stride=1, padding=0).cuda()
-                self.flat = nn.Flatten().cuda()
-                self.lin1 = nn.Linear(1024, 4096).cuda()
-                self.rel5 = nn.ReLU(inplace=True).cuda()
-                self.lin2 = nn.Linear(4096, 4096).cuda()
-                self.rel6 = nn.ReLU(inplace=True).cuda()
-                self.drop = nn.Dropout().cuda()
-                self.output = nn.Linear(4096, self.num_outputs).cuda()
+            # adding a new (learnable) final layer
+            self.net.fc = nn.Linear(512, self.num_outputs)
+
+            # moving the network to the right device memory
+            self.net.to(self.device)
+
+            # mean and std of the data on which the resnet was trained
+            self.data_mean[:] = torch.tensor([0.485, 0.456, 0.406])
+            self.data_std[:] = torch.tensor([0.229, 0.224, 0.225])
+
+            # moving the network to the right device memory
+            self.net.to(self.device)
 
         else:
             if backbone is not None:
                 raise ValueError("Unknown backbone: " + str(backbone))
             else:
                 raise ValueError("Specify a backbone network!")
-
-        # registering data_mean and data_std as 'buffers', so they will be saved together with the net
-        self.net.register_buffer("data_mean_buffer", torch.tensor([0.49139968, 0.48215841, 0.44653091]))
-        self.net.register_buffer("data_std_buffer", torch.tensor([0.24703223, 0.24348513, 0.26158784]))
 
     def save(self, file_name):
         """Save the classifier (network and data mean and std)."""
@@ -159,29 +143,6 @@ class Classifier(nn.Module):
         outputs = torch.nn.functional.softmax(logits, dim=1)
 
         # we also return the logits (useful in order to more precisely compute the loss function)
-        return outputs, logits
-
-    def forward_res(self, x):
-
-        O1 = self.conv1(x)
-        O2 = self.rel1(O1)
-        O3 = self.max1(O2)
-        O4 = self.conv2(O3) + O1
-        O5 = self.rel2(O4)
-        O6 = self.conv3(O5)
-        O7 = self.rel3(O6)
-        O8 = self.conv4(O7) + O6
-        O9 = self.rel4(O8)
-        O10 = self.conv5(O9)
-        O11 = self.flat(O10)
-        O12 = self.lin1(O11)
-        O13 = self.rel5(O12)
-        O14 = self.lin2(O13)
-        O15 = self.rel6(O14)
-        O16 = self.drop(O15)
-        logits = self.output(O16)
-        outputs = torch.nn.functional.softmax(logits, dim=1)
-
         return outputs, logits
 
     @staticmethod
@@ -237,8 +198,10 @@ class Classifier(nn.Module):
                 local_labels = local_labels.to(self.device)
 
                 # computing the network output on the current mini-batch
-
-                outputs, logits = self.forward(local_batch)
+                if netname == 'MLP' or 'CNN':
+                    outputs, logits = self.forward(local_batch)
+                elif netname == 'ResNet':
+                    outputs, logits = self.forward_res(local_batch)
 
                 # computing the loss function
                 loss = Classifier.__loss(logits, local_labels)
@@ -263,7 +226,7 @@ class Classifier(nn.Module):
                     self.net.train()  # going back to train mode
 
                     # printing (mini-batch related) stats on screen
-                    # print("  mini-batch:\tloss={0:.4f}, tr_acc={1:.2f}".format(loss.item(), batch_train_acc))
+                    print("  mini-batch:\tloss={0:.4f}, tr_acc={1:.2f}".format(loss.item(), batch_train_acc))
 
             val_acc = self.eval_classifier(validation_set, netname)
 
@@ -355,7 +318,8 @@ class Classifier(nn.Module):
 
     def prune_net(self, netname, tech, parameter, percentage):
 
-        """Prune the network.
+        """Prune the network using the pruning functions inside torch. This function creates a mask filled with 0 and 1
+           which is then multiplied by the original weight parameters to create a new weight matrix
 
         Args:
             netname: string with the name of the net to prune. Used to set the layers
@@ -364,40 +328,52 @@ class Classifier(nn.Module):
             parameter: string with the parameter that will be pruned. Can be bias or weight
             percentage: integer with the value of the amount of parameters to be pruned
         """
-        n1 = self.net.one
-        n3 = self.net.three
-        n4 = self.net.four
-        n5 = self.net.five
-        n6 = self.net.six
-        n7 = self.net.seven
-        n8 = self.net.eight
-        n9 = self.net.nine
-        n10 = self.net.ten
-        n12 = self.net.twelve
 
         if tech == 'structured':
             if netname == 'MLP':
-                prune.ln_structured(n1, name='weight', amount=percentage, n=1, dim=0)
-                prune.ln_structured(n3, name='weight', amount=percentage, n=1, dim=0)
-                prune.ln_structured(n5, name='weight', amount=percentage, n=1, dim=0)
-                prune.ln_structured(n7, name='weight', amount=percentage, n=1, dim=0)
-                prune.ln_structured(n9, name='weight', amount=percentage, n=1, dim=0)
-                prune.ln_structured(n12, name='weight', amount=percentage, n=1, dim=0)
+                n1 = self.net.one
+                n3 = self.net.three
+                n5 = self.net.five
+                n7 = self.net.seven
+                n9 = self.net.nine
+                n12 = self.net.twelve
+                prune.ln_structured(n1, name=parameter, amount=percentage, n=1, dim=0)
+                prune.ln_structured(n3, name=parameter, amount=percentage, n=1, dim=0)
+                prune.ln_structured(n5, name=parameter, amount=percentage, n=1, dim=0)
+                prune.ln_structured(n7, name=parameter, amount=percentage, n=1, dim=0)
+                prune.ln_structured(n9, name=parameter, amount=percentage, n=1, dim=0)
+                prune.ln_structured(n12, name=parameter, amount=percentage, n=1, dim=0)
 
             if netname == 'CNN':
+                n1 = self.net.one
+                n4 = self.net.four
+                n6 = self.net.six
+                n8 = self.net.eight
+                n10 = self.net.ten
+                n12 = self.net.twelve
                 n14 = self.net.fourteen
                 n17 = self.net.seventeen
-                prune.ln_structured(n1, name='weight', amount=percentage, n=1, dim=0)
-                prune.ln_structured(n4, name='weight', amount=percentage, n=1, dim=0)
-                prune.ln_structured(n6, name='weight', amount=percentage, n=1, dim=0)
-                prune.ln_structured(n8, name='weight', amount=percentage, n=1, dim=0)
-                prune.ln_structured(n10, name='weight', amount=percentage, n=1, dim=0)
-                prune.ln_structured(n12, name='weight', amount=percentage, n=1, dim=0)
-                prune.ln_structured(n14, name='weight', amount=percentage, n=1, dim=0)
-                prune.ln_structured(n17, name='weight', amount=percentage, n=1, dim=0)
+                prune.ln_structured(n1, name=parameter, amount=percentage, n=1, dim=0)
+                prune.ln_structured(n4, name=parameter, amount=percentage, n=1, dim=0)
+                prune.ln_structured(n6, name=parameter, amount=percentage, n=1, dim=0)
+                prune.ln_structured(n8, name=parameter, amount=percentage, n=1, dim=0)
+                prune.ln_structured(n10, name=parameter, amount=percentage, n=1, dim=0)
+                prune.ln_structured(n12, name=parameter, amount=percentage, n=1, dim=0)
+                prune.ln_structured(n14, name=parameter, amount=percentage, n=1, dim=0)
+                prune.ln_structured(n17, name=parameter, amount=percentage, n=1, dim=0)
+            if netname == 'ResNet':
+                for name, module in self.net.named_modules():
+                    if isinstance(module, torch.nn.Conv2d) or isinstance(module, torch.nn.Linear):
+                        prune.ln_structured(module, name=parameter, amount=percentage, n=1, dim=0)
 
         else:
             if netname == 'MLP':
+                n1 = self.net.one
+                n3 = self.net.three
+                n5 = self.net.five
+                n7 = self.net.seven
+                n9 = self.net.nine
+                n12 = self.net.twelve
                 parameters_to_prune = (
                     (n1, parameter),
                     (n3, parameter),
@@ -405,7 +381,14 @@ class Classifier(nn.Module):
                     (n7, parameter),
                     (n9, parameter),
                     (n12, parameter))
+                prune.global_unstructured(parameters_to_prune, pruning_method=tech, amount=percentage)
             if netname == 'CNN':
+                n1 = self.net.one
+                n4 = self.net.four
+                n6 = self.net.six
+                n8 = self.net.eight
+                n10 = self.net.ten
+                n12 = self.net.twelve
                 n14 = self.net.fourteen
                 n17 = self.net.seventeen
                 parameters_to_prune = (
@@ -418,7 +401,13 @@ class Classifier(nn.Module):
                     (n14, parameter),
                     (n17, parameter)
                 )
-            prune.global_unstructured(parameters_to_prune, pruning_method=tech, amount=percentage)
+                prune.global_unstructured(parameters_to_prune, pruning_method=tech, amount=percentage)
+            if netname == 'ResNet':
+                parameters_to_prune = []
+                for name, module in self.named_modules():
+                    if isinstance(module, torch.nn.Conv2d) or isinstance(module, torch.nn.Linear):
+                        parameters_to_prune.append((module, parameter))
+                prune.global_unstructured(parameters_to_prune, pruning_method=tech, amount=percentage)
 
     # Function to test the processing speed and performance of the pruned model
     def pruning_performance(self, dataset, model, n):
@@ -427,7 +416,7 @@ class Classifier(nn.Module):
 
         Args:
             dataset: dataset used to test the net in dataloader format.
-            model: string with the name of the net, MLP, CNN or ResNet
+            model: string with the name of the net: MLP, CNN or ResNet
             n: integer with the number of times the net will be tested
 
         Returns:
@@ -442,29 +431,40 @@ class Classifier(nn.Module):
         return (total_time / n), (accuracy / n)
 
     def compression(self, netname):
-        n1 = self.net.one
-        n3 = self.net.three
-        n4 = self.net.four
-        n5 = self.net.five
-        n6 = self.net.six
-        n7 = self.net.seven
-        n8 = self.net.eight
-        n9 = self.net.nine
-        n10 = self.net.ten
-        n12 = self.net.twelve
+        """Calculates the compression as the total number of parameters divided by the nonzero parameters
+           since the size of the model is the same
+
+                Args:
+                    netname: string with the name of the net, MLP, CNN or ResNet
+
+                Returns:
+                    The total number of parameters divided by the nonzero parameters
+                """
 
         total = 0
         nonzero = 0
         if netname == 'MLP':
+            n1 = self.net.one
+            n3 = self.net.three
+            n5 = self.net.five
+            n7 = self.net.seven
+            n9 = self.net.nine
+            n12 = self.net.twelve
             layersMLP = [n1, n3, n5, n7, n9, n12]
             for layer in layersMLP:
                 tw = np.prod(layer.weight.shape)
                 tb = np.prod(layer.bias.shape)
                 tw_nonzero = np.count_nonzero(layer.weight.cpu().detach().numpy())
                 tb_nonzero = np.count_nonzero(layer.bias.cpu().detach().numpy())
-                total += (tw+tb)
-                nonzero += (tw_nonzero+tb_nonzero)
+                total += (tw + tb)
+                nonzero += (tw_nonzero + tb_nonzero)
         if netname == 'CNN':
+            n1 = self.net.one
+            n4 = self.net.four
+            n6 = self.net.six
+            n8 = self.net.eight
+            n10 = self.net.ten
+            n12 = self.net.twelve
             n14 = self.net.fourteen
             n17 = self.net.seventeen
             layersCNN = [n1, n4, n6, n8, n10, n12, n14, n17]
@@ -475,7 +475,20 @@ class Classifier(nn.Module):
                 tb_nonzero = np.count_nonzero(layer.bias.cpu().detach().numpy())
                 total += (tw + tb)
                 nonzero += (tw_nonzero + tb_nonzero)
-        return int(total)/int(nonzero)
+        if netname == 'ResNet':
+            for name, module in self.named_modules():
+                if isinstance(module, torch.nn.Conv2d) or isinstance(module, torch.nn.Linear):
+                    tw = np.prod(module.weight.shape)
+                    tb = 0
+                    tb_nonzero = 0
+                    if isinstance(module.bias, torch.cuda.FloatTensor):
+                        tb = np.prod(module.bias.shape)
+                        tb_nonzero = np.count_nonzero(module.bias.cpu().detach().numpy())
+                    tw_nonzero = np.count_nonzero(module.weight.cpu().detach().numpy())
+
+                    total += (tw + tb)
+                    nonzero += (tw_nonzero + tb_nonzero)
+        return int(total) / int(nonzero)
 
 
 def parse_command_line_arguments():
@@ -494,8 +507,6 @@ def parse_command_line_arguments():
                         help='device to be used for computations (in {cpu, cuda:0, cuda:1, ...}, default: cuda:0)')
     parser.add_argument('--pruning', type=str, default='random', choices=['random', 'unstructured', 'structured'],
                         help='pruning technique (default: random)"')
-    parser.add_argument('--prune_parameters', type=str, default='weight', choices=['weight', 'bias'],
-                        help='parameter to prune (default: weight)"')
 
     parsed_arguments: Namespace = parser.parse_args()
 
@@ -509,24 +520,43 @@ if __name__ == "__main__":
     for k, v in args.__dict__.items():
         print(k + '=' + str(v))
 
+    # We can change the batch size here
+    batch_size = 64
+
     if args.mode == 'train':
         print("Training the classifier...")
 
         # preparing dataset
+        if args.backbone == 'CNN' or 'MLP':
+            transform_train = transforms.Compose([
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.ToTensor(),
+                transforms.Normalize((0.49139968, 0.48215841, 0.44653091), (0.24703223, 0.24348513, 0.26158784))
+            ])
 
-        transform_train = transforms.Compose([
-            transforms.RandomCrop(32, padding=4),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.ToTensor(),
-            transforms.Normalize((0.49139968, 0.48215841, 0.44653091), (0.24703223, 0.24348513, 0.26158784))
-        ])
+            transform_test = transforms.Compose([
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.ToTensor(),
+                transforms.Normalize(([0.49421428, 0.48513139, 0.45040909]), (0.24665252, 0.24289226, 0.26159238))
+            ])
 
-        transform_test = transforms.Compose([
-            transforms.RandomCrop(32, padding=4),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.ToTensor(),
-            transforms.Normalize(([0.49421428, 0.48513139, 0.45040909]), (0.24665252, 0.24289226, 0.26159238))
-        ])
+        if args.backbone == 'ResNet':
+            # preprocessing operations to transform the input image accordingly to what resnet expects
+            transform_train = transforms.Compose([
+                transforms.RandomResizedCrop(224, scale=(0.08, 1.0), ratio=(3. / 4., 4. / 3.)),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+
+            transform_test = transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
 
         _train_set = torchvision.datasets.CIFAR10(
             root='./data', train=True, download=True, transform=transform_train)
@@ -569,12 +599,20 @@ if __name__ == "__main__":
     elif args.mode == 'eval':
         print("Evaluating the classifier...")
 
-        transform_test = transforms.Compose([
-            transforms.RandomCrop(32, padding=4),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.ToTensor(),
-            transforms.Normalize(([0.49421428, 0.48513139, 0.45040909]), (0.24665252, 0.24289226, 0.26159238))
-        ])
+        if args.backbone == 'CNN' or 'MLP':
+            transform_test = transforms.Compose([
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.ToTensor(),
+                transforms.Normalize(([0.49421428, 0.48513139, 0.45040909]), (0.24665252, 0.24289226, 0.26159238))
+            ])
+        if args.backbone == 'ResNet':
+            transform_test = transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
 
         testset = torchvision.datasets.CIFAR10(
             root='./data', train=False, download=True, transform=transform_test)
@@ -605,13 +643,22 @@ if __name__ == "__main__":
         elif args.pruning == 'structured':
             technique = args.pruning
 
-        # Load the testset to test the pruned and unpruned models
-        transform_test = transforms.Compose([
-            transforms.RandomCrop(32, padding=4),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.ToTensor(),
-            transforms.Normalize(([0.49421428, 0.48513139, 0.45040909]), (0.24665252, 0.24289226, 0.26159238))
-        ])
+        if args.backbone == 'CNN' or 'MLP':
+            # Load the testset to test the pruned and unpruned models
+            transform_test = transforms.Compose([
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.ToTensor(),
+                transforms.Normalize(([0.49421428, 0.48513139, 0.45040909]), (0.24665252, 0.24289226, 0.26159238))
+            ])
+
+        if args.backbone == 'ResNet':
+            transform_test = transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
 
         testset = torchvision.datasets.CIFAR10(
             root='./data', train=False, download=True, transform=transform_test)
@@ -621,32 +668,59 @@ if __name__ == "__main__":
 
         # We set the percentages to prune, we will arrive up to 80%
         percentages = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
-        a = 1
-        processing_time = [0] * (len(percentages) + 1)
-        acc = [0] * (len(percentages) + 1)
-        compression = [0] * (len(percentages) + 1)
+        processing_time_weight = [0] * (len(percentages) + 1)
+        acc_weight = [0] * (len(percentages) + 1)
+        compression_weight = [0] * (len(percentages) + 1)
 
         # n is the number of times the models will be tested
-        n = 7
+        n = 2
 
         # In order to prune a model, the desired model is created and loaded,
         # but first we test it on the unpruned model
         _classifier = Classifier(args.backbone, args.device)
         _classifier.load('{}.pth'.format(args.backbone))
-        (processing_time[0], acc[0]) = _classifier.pruning_performance(test_loader, args.backbone, n)
-        compression[0] = 1
+        (processing_time_weight[0], acc_weight[0]) = _classifier.pruning_performance(test_loader,
+                                                                                     args.backbone, n)
+        compression_weight[0] = 1
+
         # Classifier is loaded each loop in order to reinitialize the weights to the original ones
+        a = 1
         for number in percentages:
-            print('Started {} pruning {} {} parameters for {} net'.format(args.pruning, number, args.prune_parameters, args.backbone))
+            print('Started {} pruning {} {} parameters for {} net'.format(args.pruning, number, 'weight',
+                                                                          args.backbone))
             _classifier = Classifier(args.backbone, args.device)
             _classifier.load('{}.pth'.format(args.backbone))
-            _classifier.prune_net(args.backbone, technique, args.prune_parameters, number)
+            _classifier.prune_net(args.backbone, technique, 'weight', number)
 
             # With this function we measure processing time and accuracy of the model
-            (processing_time[a], acc[a]) = _classifier.pruning_performance(test_loader, args.backbone, n)
-            compression[a] = _classifier.compression(args.backbone)
+            (processing_time_weight[a], acc_weight[a]) = _classifier.pruning_performance(test_loader,
+                                                                                         args.backbone, n)
+            # With this one we measure the compression of the model
+            compression_weight[a] = _classifier.compression(args.backbone)
+
             a += 1
 
-        print('Processing times are {}\n'.format(processing_time))
-        print('Accuracies are {}\n'.format(acc))
-        print('Compression rates are {}'.format(compression))
+        # From here to the end it's all graphics
+        percentages.insert(0, 0)
+        sns.set_theme(style='darkgrid')
+        figure, axis = plt.subplots(3, 1)
+        figure.suptitle('Results of {} pruning of {} net'.format(args.pruning, args.backbone))
+        axis[0].plot(percentages, processing_time_weight, marker='o')
+
+        axis[0].set_ylabel('Processing time')
+        axis[0].set_yticks(np.arange(35 if args.backbone == 'ResNet' else 2, 65 if args.backbone == 'ResNet' else 4,
+                                     5 if args.backbone == 'ResNet' else 0.4))
+        axis[0].set_xticks(percentages)
+        axis[1].plot(percentages, acc_weight, marker='o')
+
+        axis[1].set_ylabel('Accuracy')
+        axis[1].set_yticks(np.arange(10, 60 if args.backbone == 'MLP' else 80, 10))
+        axis[1].set_xticks(percentages)
+        axis[2].plot(percentages, compression_weight, marker='o')
+
+        axis[2].set_yticks(np.arange(1, 6, 1))
+        axis[2].set_xticks(percentages)
+        axis[2].set_ylabel('Compression')
+        plt.savefig("./Graphics/{}_{}.jpg".format(args.backbone, args.pruning)
+                    , bbox_inches='tight')
+        plt.show()
